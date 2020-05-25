@@ -17,7 +17,12 @@ package raft
 //   in the same server.
 //
 
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"time"
+)
 import "sync/atomic"
 import "../labrpc"
 
@@ -56,6 +61,18 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	state             NodeState
+	curTerm			  uint64
+
+	//election timeout states
+	elecTimeoutBounds ElecTimeoutBounds
+	randNumGen *rand.Rand // random number generator that seed is initialized with time.Now().UnixNano()
+
+	//candidate states
+	//votedFor
+	//vote
+
+
 
 }
 
@@ -127,11 +144,46 @@ type RequestVoteReply struct {
 	// Your data here (2A).
 }
 
+type NodeState uint32
+
+const (
+	Follower = iota + 1
+	Candidate
+	Leader
+)
+
+func (n NodeState) String() string {
+	switch n {
+	case Follower:
+		return "Follower"
+	case Candidate:
+		return "Candidate"
+	case Leader:
+		return "Leader"
+
+	default:
+		return "Unknown"
+	}
+}
+
+// in ms [min,max)
+type ElecTimeoutBounds struct {
+	// min is the minimum election timeout.
+	// It should be at least several times of the time it takes for sending 1 heartbeat from the leader to a follower
+	min int32
+	// max affects how quickly the system can recover from the failed leader
+	max int32
+
+
+
+}
+
 //
 // example RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+
 }
 
 //
@@ -215,6 +267,41 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
+func (rf *Raft) GetRandTimeout() int32 {
+	return  rf.randNumGen.Int31n(rf.elecTimeoutBounds.max - rf.elecTimeoutBounds.min) + rf.elecTimeoutBounds.min
+}
+
+// main program loop for a raft instance
+func (rf *Raft) Loop() {
+	for {
+		if rf.state == Follower {
+			randTimeout := rf.GetRandTimeout()
+			select {
+			//case <- heartbeatChan:
+				//
+			case <- time.After(time.Duration(randTimeout)*time.Millisecond):
+				//not receiving a heartbeat for longer than the timeout
+				// start a new lection
+				rf.state = Candidate
+			}
+
+		} else if rf.state == Candidate {
+			// vote for itself and ask other nodes for vote with the goal to have votes from the majority
+			rf.curTerm += 1
+			//rf.AskforVotes()
+			//for rf.voteCount
+
+
+		} else if rf.state == Leader {
+
+		} else {
+			fmt.Println("Unknown instance state")
+		}
+
+	}
+
+}
+
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -228,16 +315,25 @@ func (rf *Raft) killed() bool {
 //
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
+	rf := &Raft{
+		peers:     peers,
+		me:        me,
+		persister: persister,
+		/////////////////////
+		state: Follower,
+		curTerm: 0,
+		elecTimeoutBounds: ElecTimeoutBounds{
+			min:500,
+			max:600,
+		},
+		randNumGen: rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
 
 	// Your initialization code here (2A, 2B, 2C).
+	go rf.Loop()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
 
 	return rf
 }
