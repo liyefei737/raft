@@ -21,7 +21,6 @@ import (
 	"../labgob"
 	"../labrpc"
 	"bytes"
-	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -318,7 +317,7 @@ func (rf *Raft) sendAppendEntry(server int, args *AppendEntryArgs, reply *Append
 						}
 					}
 					if count > len(rf.peers)/2 {
-						fmt.Printf("Updating leader(%d) commitIndex from %d to %d\n", rf.me, rf.commitIndex, N)
+						log.Printf("Updating leader(%d) commitIndex from %d to %d\n", rf.me, rf.commitIndex, N)
 						rf.commitIndex = N
 						go rf.applyLogs()
 					}
@@ -353,7 +352,7 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.heartbeatCh <- HeartBeatMssg{args.LeaderId, args.Term}
 	// heartbeat message format: leader_numberb e.g. 1b, heartbeat from node 1
 	if len(args.Entries) == 0 {
-		fmt.Printf("%db\n", args.LeaderId)
+		log.Printf("%db\n", args.LeaderId)
 	}
 
 	// invariance: if prev index and term is the same, all previous logs the same
@@ -377,7 +376,7 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 			} else {
 				rf.commitIndex = lastNewEntry
 			}
-			fmt.Printf("%s(%d) Updating commitIndex from %d to %d\n", rf.state, rf.me, old, rf.commitIndex)
+			log.Printf("%s(%d) Updating commitIndex from %d to %d\n", rf.state, rf.me, old, rf.commitIndex)
 			go rf.applyLogs()
 		}
 		return
@@ -543,7 +542,7 @@ func (rf *Raft) loop() {
 			time.Sleep(150 * time.Millisecond)
 
 		} else {
-			fmt.Println("Unknown instance state")
+			log.Println("Unknown instance state")
 		}
 
 	}
@@ -640,10 +639,9 @@ func getLastLogIndex(rf *Raft) int {
 }
 
 func (rf *Raft) printLeaderInfo() {
-	log.Printf("Leader info:\n")
-	fmt.Printf("Leader Node: %d		Term: %d\n", rf.me, rf.curTerm)
-	fmt.Printf("			commitIndex: %d\n", rf.commitIndex)
-	fmt.Printf("			lastApplied: %d\n", rf.lastApplied)
+	log.Printf("Leader info:\n" +
+		"Leader Node: %d\t\tTerm: %d\n" +
+		"\t\t\tcommitIndex: %d\n\t\t\tlastApplied: %d\n", rf.me, rf.curTerm, rf.commitIndex, rf.lastApplied)
 }
 
 //
