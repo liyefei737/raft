@@ -18,13 +18,14 @@ package raft
 //
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
-
+	"../labgob"
 	"../labrpc"
 )
 
@@ -106,13 +107,13 @@ func (rf *Raft) GetState() (int, bool) {
 //
 func (rf *Raft) persist() {
 	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	enc := labgob.NewEncoder(w)
+	enc.Encode(rf.curTerm)
+	enc.Encode(rf.votedFor)
+	enc.Encode(rf.logs)
+	bytes := w.Bytes()
+	rf.persister.SaveRaftState(bytes)
 }
 
 //
@@ -123,18 +124,11 @@ func (rf *Raft) readPersist(data []byte) {
 		return
 	}
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	d.Decode(&rf.curTerm)
+	d.Decode(&rf.votedFor)
+	d.Decode(&rf.logs)
 }
 
 type NodeState uint32
@@ -676,25 +670,10 @@ func (rf *Raft) applyLogs() {
 	}
 	rf.lastApplied = rf.commitIndex
 	log.Printf("%s(%d)	lastApplied: %d		commitIndex %d\n",rf.state, rf.me, rf.lastApplied, rf.commitIndex)
-	//fmt.Println("okokok")
 }
 
-//func (rf *Raft) notifyNewLog() {
-//	select {
-//	case rf.newLogCh <- true:
-//		fmt.Println("send a note on new log")
-//	default:
-//	}
-//}
 
-func (rf *Raft) printLeaderInfo() {
-	log.Printf("Leader info:\n")
-	fmt.Printf("Leader Node: %d		Term: %d\n", rf.me, rf.curTerm)
-	fmt.Printf("			commitIndex: %d\n", rf.commitIndex)
-	fmt.Printf("			lastApplied: %d\n", rf.lastApplied)
-}
-
-//simple helper functions
+//helper functions
 func getLastLogTerm(rf *Raft) int {
 	if len(rf.logs) == 0 {
 		return -1
@@ -708,6 +687,13 @@ func getLastLogIndex(rf *Raft) int {
 	}
 	return len(rf.logs) - 1
 
+}
+
+func (rf *Raft) printLeaderInfo() {
+	log.Printf("Leader info:\n")
+	fmt.Printf("Leader Node: %d		Term: %d\n", rf.me, rf.curTerm)
+	fmt.Printf("			commitIndex: %d\n", rf.commitIndex)
+	fmt.Printf("			lastApplied: %d\n", rf.lastApplied)
 }
 
 //
