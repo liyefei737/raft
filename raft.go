@@ -18,6 +18,8 @@ package raft
 //
 
 import (
+	"../labgob"
+	"../labrpc"
 	"bytes"
 	"fmt"
 	"log"
@@ -25,8 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"../labgob"
-	"../labrpc"
 )
 
 // import "bytes"
@@ -50,8 +50,8 @@ type ApplyMsg struct {
 }
 
 type Log struct {
-	Term int
-	Command interface {}
+	Term    int
+	Command interface{}
 }
 
 //
@@ -240,7 +240,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		}
 		return false
 	}()
-	log.Printf("node %d(Term %d) requests node %d(Term %d) to vote candi more up to date? %v",args.CandidID, args.Term, rf.me, rf.curTerm, isCandidLogsMoreUpToDate)
+	log.Printf("node %d(Term %d) requests node %d(Term %d) to vote candi more up to date? %v", args.CandidID, args.Term, rf.me, rf.curTerm, isCandidLogsMoreUpToDate)
 
 	switch {
 	case args.Term < rf.curTerm:
@@ -261,11 +261,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.stopHeartBeats()
 		}
 		rf.state = Follower
+		rf.persist()
 	case (rf.votedFor == -1 || rf.votedFor == args.CandidID) && isCandidLogsMoreUpToDate:
 		//equal current term
 		// this nodeId has either not voted or has already voted this candidate
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidID
+		rf.persist()
 	default:
 		reply.VoteGranted = false
 		reply.Term = rf.curTerm
@@ -273,7 +275,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	}
 
-	log.Printf("node %d(Term %d) requests node %d(Term %d) to vote vote granted: %v\n ",args.CandidID, args.Term, rf.me, rf.curTerm, reply.VoteGranted)
+	log.Printf("node %d(Term %d) requests node %d(Term %d) to vote vote granted: %v\n ", args.CandidID, args.Term, rf.me, rf.curTerm, reply.VoteGranted)
 	//log.Printf("Node %d asks nodeId %d to vote	Election Term : %d	Vote granted? %v", args.CandidID, rf.me, args.Term, reply.VoteGranted)
 	//log.Printf("votedfor: %d | rf.Term | args.Term: %d | %d", rf.votedFor, rf.curTerm, args.Term)
 
@@ -305,6 +307,7 @@ func (rf *Raft) sendAppendEntry(server int, args *AppendEntryArgs, reply *Append
 				rf.state = Follower
 				rf.curTerm = reply.Term
 				rf.votedFor = -1
+				rf.persist()
 				break
 			}
 
@@ -325,7 +328,7 @@ func (rf *Raft) sendAppendEntry(server int, args *AppendEntryArgs, reply *Append
 						}
 					}
 					if count > len(rf.peers)/2 {
-						fmt.Printf("Updating leader(%d) commitIndex from %d to %d\n",rf.me, rf.commitIndex, N)
+						fmt.Printf("Updating leader(%d) commitIndex from %d to %d\n", rf.me, rf.commitIndex, N)
 						rf.commitIndex = N
 						go rf.applyLogs()
 					}
@@ -387,9 +390,10 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 		rf.logs = rf.logs[:args.PrevLogIndex+1]
 
 		rf.logs = append(rf.logs, args.Entries...)
+		rf.persist()
 		if len(rf.logs) > oldLen {
 
-		log.Printf("%s(%d) log updated from length %d to %d: %v\n",rf.state,rf.me,oldLen, len(rf.logs), rf.logs)
+			log.Printf("%s(%d) log updated from length %d to %d: %v\n", rf.state, rf.me, oldLen, len(rf.logs), rf.logs)
 		}
 
 		if args.CommitIndex > rf.commitIndex {
@@ -401,7 +405,7 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 			} else {
 				rf.commitIndex = lastNewEntry
 			}
-			fmt.Printf("%s(%d) Updating commitIndex from %d to %d\n",rf.state,rf.me,old, rf.commitIndex )
+			fmt.Printf("%s(%d) Updating commitIndex from %d to %d\n", rf.state, rf.me, old, rf.commitIndex)
 			go rf.applyLogs() //here ?
 		}
 
@@ -465,9 +469,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// wa want expose this function later as an rpc call, so we want to make it thread-safe
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	newEntry := Log{curTerm,command}
+	newEntry := Log{curTerm, command}
 	rf.logs = append(rf.logs, newEntry)
-	log.Printf("Term %d Leader(%d)New log appended %v\n",rf.curTerm,rf.me, rf.logs)
+	rf.persist()
+	log.Printf("Term %d Leader(%d)New log appended %v\n", rf.curTerm, rf.me, rf.logs)
 	index = len(rf.logs) - 1
 	//go rf.notifyNewLog()
 
@@ -538,6 +543,7 @@ func (rf *Raft) Loop() {
 			voteCount := 1
 			yesCount := 1
 			rf.votedFor = rf.me
+			rf.persist()
 			majorityCount := len(rf.peers) / 2
 
 			electionTimeout := rf.GetRandTimeout()
@@ -663,15 +669,14 @@ func (rf *Raft) stopHeartBeats() {
 }
 
 func (rf *Raft) applyLogs() {
-	log.Printf("%s(%d) Updating/Applying lastApplied lastApplied: %d\t\tcommitIndex %d\n",rf.state, rf.me,rf.lastApplied, rf.commitIndex)
+	log.Printf("%s(%d) Updating/Applying lastApplied lastApplied: %d\t\tcommitIndex %d\n", rf.state, rf.me, rf.lastApplied, rf.commitIndex)
 	//log.Printf("node %d log: %v\n",rf.me, rf.logs)
 	for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 		rf.applyCh <- ApplyMsg{CommandIndex: i, Command: rf.logs[i].Command, CommandValid: true}
 	}
 	rf.lastApplied = rf.commitIndex
-	log.Printf("%s(%d)	lastApplied: %d		commitIndex %d\n",rf.state, rf.me, rf.lastApplied, rf.commitIndex)
+	log.Printf("%s(%d)	lastApplied: %d		commitIndex %d\n", rf.state, rf.me, rf.lastApplied, rf.commitIndex)
 }
-
 
 //helper functions
 func getLastLogTerm(rf *Raft) int {
@@ -710,14 +715,14 @@ func (rf *Raft) printLeaderInfo() {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{
-		me:        me,
-		curTerm:  0,
-		state:    Follower,
-		votedFor: -1,
-		logs: []Log{},
-		commitIndex: -1,
-		peers:     peers,
-		lastApplied: -1,
+		me:          me,
+		curTerm:     0,
+		state:       Follower,
+		votedFor:    -1,
+		logs:        []Log{ Log{}}, // use the convention specified in raft's paper to start indexing logs from 1
+		commitIndex: 0,
+		peers:       peers,
+		lastApplied: 0,
 		elecTimeoutBounds: ElecTimeoutBounds{
 			min: 250,
 			max: 600,
@@ -727,7 +732,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		newLogCh:    make(chan bool, 1),
 		killedCh:    make(chan bool, 1),
 		applyCh:     applyCh,
-		persister: persister,
+		persister:   persister,
 	}
 
 	log.Printf("Raft: Node %d created	Term %d		State %s", rf.me, rf.curTerm, rf.state)
